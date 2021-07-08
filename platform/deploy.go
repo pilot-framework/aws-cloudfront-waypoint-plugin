@@ -15,6 +15,10 @@ type S3BucketAPI interface {
 	CreateBucket(ctx context.Context,
 		params *s3.CreateBucketInput,
 		optFns ...func(*s3.Options)) (*s3.CreateBucketOutput, error)
+
+	PutBucketPolicy(ctx context.Context,
+		params *s3.PutBucketPolicyInput,
+		optFns ...func(*s3.Options)) (*s3.PutBucketPolicyOutput, error)
 }
 
 // MakeBucket creates an Amazon S3 bucket.
@@ -27,6 +31,10 @@ type S3BucketAPI interface {
 //     Otherwise, nil and an error from the call to CreateBucket.
 func MakeBucket(c context.Context, api S3BucketAPI, input *s3.CreateBucketInput) (*s3.CreateBucketOutput, error) {
 	return api.CreateBucket(c, input)
+}
+
+func SetPublicBucketPolicy(c context.Context, api S3BucketAPI, input *s3.PutBucketPolicyInput) (*s3.PutBucketPolicyOutput, error) {
+	return api.PutBucketPolicy(c, input)
 }
 
 type PlatformConfig struct {
@@ -91,12 +99,12 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 
 	client := s3.NewFromConfig(cfg)
 
-	input := &s3.CreateBucketInput{
+	cBInput := &s3.CreateBucketInput{
 		Bucket: &p.config.BucketName,
 	}
 
 	u.Step(terminal.StatusOK, "Creating bucket "+p.config.BucketName)
-	_, err = MakeBucket(context.TODO(), client, input)
+	_, err = MakeBucket(context.TODO(), client, cBInput)
 	if err != nil {
 		u.Step(terminal.StatusError, "Could not create bucket "+p.config.BucketName)
 		return nil, err
@@ -104,5 +112,35 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 
 	u.Step(terminal.StatusOK, "Bucket created successfully")
 
+	u.Step(terminal.StatusOK, "Setting bucket permissions")
+
+	policy := getPolicy(p.config.BucketName)
+
+	pBPInput := &s3.PutBucketPolicyInput{
+		Bucket: &p.config.BucketName,
+		Policy: &policy,
+	}
+
+	_, err = SetPublicBucketPolicy(context.TODO(), client, pBPInput)
+	if err != nil {
+		u.Step(terminal.StatusError, "Could not set bucket policy")
+		return nil, err
+	}
+
 	return &Deployment{}, nil
+}
+
+func getPolicy(b string) string {
+	return fmt.Sprintf(`{
+		"Version":"2012-10-17",
+		"Statement":[
+			{
+				"Sid":"PublicRead",
+				"Effect":"Allow",
+				"Principal": "*",
+				"Action":["s3:GetObject","s3:GetObjectVersion"],
+				"Resource":["arn:aws:s3:::%s/*"]
+			}
+		]
+	}`, b)
 }
