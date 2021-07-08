@@ -99,6 +99,7 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	_, err = MakeBucket(context.TODO(), client, input)
 	if err != nil {
 		u.Step(terminal.StatusError, "Could not create bucket "+p.config.BucketName)
+		return nil, err
 	}
 
 	u.Step(terminal.StatusOK, "Bucket created successfully")
