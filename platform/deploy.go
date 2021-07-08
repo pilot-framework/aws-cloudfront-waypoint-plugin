@@ -5,8 +5,29 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 )
+
+// S3BucketAPI defines the interface for the CreateBucket function.
+type S3BucketAPI interface {
+	CreateBucket(ctx context.Context,
+		params *s3.CreateBucketInput,
+		optFns ...func(*s3.Options)) (*s3.CreateBucketOutput, error)
+}
+
+// MakeBucket creates an Amazon S3 bucket.
+// Inputs:
+//     c is the context of the method call, which includes the AWS Region
+//     api is the interface that defines the method call
+//     input defines the input arguments to the service call.
+// Output:
+//     If success, a CreateBucketOutput object containing the result of the service call and nil.
+//     Otherwise, nil and an error from the call to CreateBucket.
+func MakeBucket(c context.Context, api S3BucketAPI, input *s3.CreateBucketInput) (*s3.CreateBucketOutput, error) {
+	return api.CreateBucket(c, input)
+}
 
 type PlatformConfig struct {
 	// AWS region to operate in
@@ -57,36 +78,30 @@ func (p *Platform) DeployFunc() interface{} {
 	return p.deploy
 }
 
-// A DeployFunc does not have a strict signature, you can define the parameters
-// you need based on the Available parameters that the Waypoint SDK provides.
-// Waypoint will automatically inject parameters as specified
-// in the signature at run time.
-//
-// Available input parameters:
-// - context.Context
-// - *component.Source
-// - *component.JobInfo
-// - *component.DeploymentConfig
-// - *datadir.Project
-// - *datadir.App
-// - *datadir.Component
-// - hclog.Logger
-// - terminal.UI
-// - *component.LabelSet
-
-// In addition to default input parameters the registry.Artifact from the Build step
-// can also be injected.
-//
-// The output parameters for BuildFunc must be a Struct which can
-// be serialzied to Protocol Buffers binary format and an error.
-// This Output Value will be made available for other functions
-// as an input parameter.
-// If an error is returned, Waypoint stops the execution flow and
-// returns an error to the user.
-func (b *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
+func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
 	u := ui.Status()
 	defer u.Close()
-	u.Update("Deploy application")
+	u.Update("Deploy S3 assets")
+
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		u.Step(terminal.StatusError, "AWS configuration error, "+err.Error())
+		return nil, err
+	}
+
+	client := s3.NewFromConfig(cfg)
+
+	input := &s3.CreateBucketInput{
+		Bucket: &p.config.BucketName,
+	}
+
+	u.Step(terminal.StatusOK, "Creating bucket "+p.config.BucketName)
+	_, err = MakeBucket(context.TODO(), client, input)
+	if err != nil {
+		u.Step(terminal.StatusError, "Could not create bucket "+p.config.BucketName)
+	}
+
+	u.Step(terminal.StatusOK, "Bucket created successfully")
 
 	return &Deployment{}, nil
 }
