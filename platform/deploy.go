@@ -31,10 +31,10 @@ func MakeBucket(c context.Context, api S3BucketAPI, input *s3.CreateBucketInput)
 
 type PlatformConfig struct {
 	// AWS region to operate in
-	Region string "hcl:region"
+	Region string `hcl:"region"`
 
 	// Name of S3 bucket to create
-	BucketName string "hcl:bucket"
+	BucketName string `hcl:"bucket"`
 }
 
 type Platform struct {
