@@ -138,33 +138,40 @@ func PutBucketWebsite(b string, client *s3.Client) error {
 // TODO: Recursively run through all files in subdirectories
 // and include the parent/grandparent directory path in filename
 // when uploading to S3.
-func PutObjects(b string, client *s3.Client) error {
-	files, err := os.ReadDir("./build")
+func PutObjects(b, subPath string, client *s3.Client, errors *[]string) []string {
+	files, err := os.ReadDir("./build/" + subPath)
 	if err != nil {
-		return err
+		*errors = append(*errors, err.Error())
 	}
 
 	for _, file := range files {
-		f, err := os.Open("./build/" + file.Name())
+		if file.IsDir() {
+			PutObjects(b, subPath+file.Name()+"/", client, errors)
+			continue
+		}
+
+		f, err := os.Open("./build/" + subPath + file.Name())
 		if err != nil {
-			return err
+			*errors = append(*errors, err.Error())
+			continue
 		}
 
 		defer f.Close()
 
 		input := &s3.PutObjectInput{
 			Bucket: &b,
-			Key:    aws.String("test/" + file.Name()),
+			Key:    aws.String(subPath + file.Name()),
 			Body:   f,
 		}
 
 		_, err = AddFile(context.TODO(), client, input)
 		if err != nil {
-			return err
+			*errors = append(*errors, err.Error())
+			continue
 		}
 	}
 
-	return err
+	return *errors
 }
 
 func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
@@ -208,10 +215,10 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	u.Step(terminal.StatusOK, "Static website hosting enabled")
 	u.Step("", "Pushing static files")
 
-	err = PutObjects(p.config.BucketName, client)
-	if err != nil {
-		u.Step(terminal.StatusError, "Static files failed to upload")
-		return nil, err
+	fileErrors := []string{}
+	PutObjects(p.config.BucketName, "", client, &fileErrors)
+	if len(fileErrors) > 0 {
+		u.Step(terminal.StatusWarn, "Some static files failed to upload")
 	}
 
 	return &Deployment{}, nil
