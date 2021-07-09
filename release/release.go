@@ -7,6 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	cfront "github.com/aws/aws-sdk-go-v2/service/cloudfront"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
+	"github.com/pilot-framework/aws-cloudfront-waypoint-plugin/platform"
 )
 
 // Defines interface for needed Cloudfront functions
@@ -44,9 +45,7 @@ func GetDistributionTags(
 	return api.ListTagsForResource(c, input)
 }
 
-type ReleaseConfig struct {
-	BucketName string `hcl:"bucket"`
-}
+type ReleaseConfig struct {}
 
 type ReleaseManager struct {
 	config ReleaseConfig
@@ -86,7 +85,7 @@ func (rm *ReleaseManager) ReleaseFunc() interface{} {
 //
 // If an error is returned, Waypoint stops the execution flow and
 // returns an error to the user.
-func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI) (*Release, error) {
+func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *platform.Deployment) (*Release, error) {
 	u := ui.Status()
 	defer u.Close()
 	u.Step("", "--- Configuring AWS Cloudfront ---")
@@ -107,7 +106,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI) (*Release
 		return nil, err
 	}
 
-	u.Update("Searching for distribution belonging to "+rm.config.BucketName+"...")
+	u.Update("Searching for distribution belonging to "+target.Bucket+"...")
 
 	var existingDistribution *string
 
@@ -123,7 +122,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI) (*Release
 		}
 
 		for _, tag := range tags.Tags.Items {
-			if *tag.Key == "bucket" && *tag.Value == rm.config.BucketName {
+			if *tag.Key == "bucket" && *tag.Value == target.Bucket {
 				existingDistribution = v.ARN
 			}
 		}
@@ -131,7 +130,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI) (*Release
 
 	// TODO: if no existingDistribution, call creation methods (with tag of bucket - BucketName)
 	if existingDistribution == nil {
-		u.Step(terminal.StatusError, fmt.Sprintf("Could not find distribution belonging to %v", rm.config.BucketName))
+		u.Step(terminal.StatusError, fmt.Sprintf("Could not find distribution belonging to %v", target.Bucket))
 	// TODO: if existingDistribution, call update methods
 	} else {
 		u.Step(terminal.StatusOK, fmt.Sprintf("Found the following distribution: %v", *existingDistribution))
