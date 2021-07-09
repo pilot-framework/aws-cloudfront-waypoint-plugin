@@ -21,6 +21,11 @@ type CloudfrontAPI interface {
 		input *cfront.ListDistributionsInput,
 		optFns ...func(*cfront.Options),
 	) (*cfront.ListDistributionsOutput, error)
+	ListTagsForResource(
+		ctx context.Context,
+		input *cfront.ListTagsForResourceInput,
+		optFns ...func(*cfront.Options),
+	) (*cfront.ListTagsForResourceOutput, error)
 }
 
 func DistributionExists(
@@ -37,6 +42,14 @@ func GetAllDistributions(
 	input *cfront.ListDistributionsInput,
 ) (*cfront.ListDistributionsOutput, error) {
 	return api.ListDistributions(c, input)
+}
+
+func GetDistributionTags(
+	c context.Context,
+	api CloudfrontAPI,
+	input *cfront.ListTagsForResourceInput,
+) (*cfront.ListTagsForResourceOutput, error) {
+	return api.ListTagsForResource(c, input)
 }
 
 type ReleaseConfig struct {
@@ -108,7 +121,21 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI) (*Release
 		return nil, err
 	}
 
-	u.Step(terminal.StatusOK, "Found the following: "+fmt.Sprintf("%+v", dists))
+	for _, v := range dists.DistributionList.Items {
+		tagInput := &cfront.ListTagsForResourceInput{
+			Resource: v.ARN,
+		}
+
+		tags, err := GetDistributionTags(context.TODO(), client, tagInput)
+		if err != nil {
+			u.Step(terminal.StatusError, fmt.Sprintf("Error retrieving tags for %+v", v.ARN))
+			return nil, err
+		}
+
+		for _, tag := range tags.Tags.Items {
+			u.Step(terminal.StatusOK, fmt.Sprintf("Found the following for %v: %v - %v", *v.ARN, *tag.Key, *tag.Value))
+		}
+	}
 	
 	_, err = DistributionExists(context.TODO(), client, input)
 	if err != nil {
