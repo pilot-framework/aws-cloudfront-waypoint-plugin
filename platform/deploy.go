@@ -25,6 +25,10 @@ type S3BucketAPI interface {
 	PutBucketWebsite(ctx context.Context,
 		params *s3.PutBucketWebsiteInput,
 		optFns ...func(*s3.Options)) (*s3.PutBucketWebsiteOutput, error)
+
+	PutObject(ctx context.Context,
+		params *s3.PutObjectInput,
+		optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
 }
 
 // MakeBucket creates an Amazon S3 bucket.
@@ -45,6 +49,10 @@ func SetPublicBucketPolicy(c context.Context, api S3BucketAPI, input *s3.PutBuck
 
 func EnableWebHosting(c context.Context, api S3BucketAPI, input *s3.PutBucketWebsiteInput) (*s3.PutBucketWebsiteOutput, error) {
 	return api.PutBucketWebsite(c, input)
+}
+
+func AddFile(c context.Context, api S3BucketAPI, input *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
+	return api.PutObject(c, input)
 }
 
 type PlatformConfig struct {
@@ -127,6 +135,38 @@ func PutBucketWebsite(b string, client *s3.Client) error {
 	return err
 }
 
+// TODO: Recursively run through all files in subdirectories
+// and include the parent/grandparent directory path in filename
+// when uploading to S3.
+func PutObjects(b string, client *s3.Client) error {
+	files, err := os.ReadDir("./build")
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		f, err := os.Open("./build/" + file.Name())
+		if err != nil {
+			return err
+		}
+
+		defer f.Close()
+
+		input := &s3.PutObjectInput{
+			Bucket: &b,
+			Key:    aws.String("test/" + file.Name()),
+			Body:   f,
+		}
+
+		_, err = AddFile(context.TODO(), client, input)
+		if err != nil {
+			return err
+		}
+	}
+
+	return err
+}
+
 func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
 	u := ui.Status()
 	defer u.Close()
@@ -167,6 +207,12 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 
 	u.Step(terminal.StatusOK, "Static website hosting enabled")
 	u.Step("", "Pushing static files")
+
+	err = PutObjects(p.config.BucketName, client)
+	if err != nil {
+		u.Step(terminal.StatusError, "Static files failed to upload")
+		return nil, err
+	}
 
 	return &Deployment{}, nil
 }
