@@ -135,9 +135,8 @@ func PutBucketWebsite(b string, client *s3.Client) error {
 	return err
 }
 
-// TODO: Recursively run through all files in subdirectories
-// and include the parent/grandparent directory path in filename
-// when uploading to S3.
+// PutObjects recursively checks for files in build path and uploads
+// to specified s3 bucket. The errors slice keeps track of errors found during upload.
 func PutObjects(b, subPath string, client *s3.Client, errors *[]string) []string {
 	files, err := os.ReadDir("./build/" + subPath)
 	if err != nil {
@@ -220,6 +219,8 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	if len(fileErrors) > 0 {
 		u.Step(terminal.StatusWarn, "Some static files failed to upload")
 	}
+
+	u.Step(terminal.StatusOK, "Upload of static files complete")
 
 	return &Deployment{
 		Bucket: p.config.BucketName,
