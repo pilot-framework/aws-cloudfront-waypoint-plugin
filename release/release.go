@@ -3,9 +3,11 @@ package release
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	cfront "github.com/aws/aws-sdk-go-v2/service/cloudfront"
+	"github.com/aws/aws-sdk-go-v2/service/cloudfront/types"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 	"github.com/pilot-framework/aws-cloudfront-waypoint-plugin/platform"
 )
@@ -27,6 +29,11 @@ type CloudfrontAPI interface {
 		input *cfront.ListTagsForResourceInput,
 		optFns ...func(*cfront.Options),
 	) (*cfront.ListTagsForResourceOutput, error)
+	CreateDistributionWithTags(
+		ctx context.Context,
+		input *cfront.CreateDistributionWithTagsInput,
+		optFns ...func(*cfront.Options),
+	) (*cfront.CreateDistributionWithTagsOutput, error)
 }
 
 func GetAllDistributions(
@@ -43,6 +50,43 @@ func GetDistributionTags(
 	input *cfront.ListTagsForResourceInput,
 ) (*cfront.ListTagsForResourceOutput, error) {
 	return api.ListTagsForResource(c, input)
+}
+
+func CreateDistribution(
+	c context.Context,
+	api CloudfrontAPI,
+	input *cfront.CreateDistributionWithTagsInput,
+) (*cfront.CreateDistributionWithTagsOutput, error) {
+	return api.CreateDistributionWithTags(c, input)
+}
+
+func FormatDistributionInput(bucket string) (*cfront.CreateDistributionWithTagsInput) {
+	tagKey := "bucket"
+	items := [](types.Tag){
+		types.Tag{Key: &tagKey, Value: &bucket},
+	}
+
+	callRef := fmt.Sprintf("pilot-ref-%v", time.Now())
+	comment := "This distribution was created via Pilot"
+	enabled := false
+
+
+	input := &cfront.CreateDistributionWithTagsInput{
+		DistributionConfigWithTags: &types.DistributionConfigWithTags{
+			DistributionConfig: &types.DistributionConfig{
+				CallerReference: &callRef,
+				Comment: &comment,
+				DefaultCacheBehavior: &types.DefaultCacheBehavior{},
+				Enabled: &enabled,
+				Origins: &types.Origins{},
+			},
+			Tags: &types.Tags{
+				Items: items,
+			},
+		},
+	}
+
+	return input
 }
 
 type ReleaseConfig struct {}
@@ -130,7 +174,16 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 
 	// TODO: if no existingDistribution, call creation methods (with tag of bucket - BucketName)
 	if existingDistribution == nil {
-		u.Step(terminal.StatusError, fmt.Sprintf("Could not find distribution belonging to %v", target.Bucket))
+		u.Step("", fmt.Sprintf("Could not find distribution belonging to %v, creating new distribution...", target.Bucket))
+
+		newDistInput := FormatDistributionInput(target.Bucket)
+
+		_, err := CreateDistribution(context.TODO(), client, newDistInput)
+		if err != nil {
+			u.Step(terminal.StatusError, fmt.Sprintf("Error creating distribution: %v", err.Error()))
+
+			return nil, err
+		}
 	// TODO: if existingDistribution, call update methods
 	} else {
 		u.Step(terminal.StatusOK, fmt.Sprintf("Found the following distribution: %v", *existingDistribution))
