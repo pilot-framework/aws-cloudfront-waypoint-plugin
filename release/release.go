@@ -69,6 +69,11 @@ func FormatDistributionInput(bucket string) (*cfront.CreateDistributionWithTagsI
 	callRef := fmt.Sprintf("pilot-ref-%v", time.Now())
 	comment := "This distribution was created via Pilot"
 	enabled := false
+	originId := "pilot-origin"
+	var viewPolicy types.ViewerProtocolPolicy
+	viewPolicy = types.ViewerProtocolPolicyAllowAll
+	var quantity int32 = 1
+	domainName := "pilot-" + bucket
 
 
 	input := &cfront.CreateDistributionWithTagsInput{
@@ -76,9 +81,20 @@ func FormatDistributionInput(bucket string) (*cfront.CreateDistributionWithTagsI
 			DistributionConfig: &types.DistributionConfig{
 				CallerReference: &callRef,
 				Comment: &comment,
-				DefaultCacheBehavior: &types.DefaultCacheBehavior{},
+				DefaultCacheBehavior: &types.DefaultCacheBehavior{
+					TargetOriginId: &originId,
+					ViewerProtocolPolicy: viewPolicy,
+				},
 				Enabled: &enabled,
-				Origins: &types.Origins{},
+				Origins: &types.Origins{
+					Quantity: &quantity,
+					Items: [](types.Origin){
+						types.Origin{
+							Id: &originId,
+							DomainName: &domainName,
+						},
+					},
+				},
 			},
 			Tags: &types.Tags{
 				Items: items,
