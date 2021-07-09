@@ -28,14 +28,6 @@ type CloudfrontAPI interface {
 	) (*cfront.ListTagsForResourceOutput, error)
 }
 
-func DistributionExists(
-	c context.Context,
-	api CloudfrontAPI,
-	input *cfront.GetDistributionInput,
-) (*cfront.GetDistributionOutput, error) {
-	return api.GetDistribution(c, input)
-}
-
 func GetAllDistributions(
 	c context.Context,
 	api CloudfrontAPI,
@@ -97,7 +89,7 @@ func (rm *ReleaseManager) ReleaseFunc() interface{} {
 func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI) (*Release, error) {
 	u := ui.Status()
 	defer u.Close()
-	u.Update("Configuring AWS Cloudfront...")
+	u.Step("", "--- Configuring AWS Cloudfront ---")
 
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
@@ -107,19 +99,17 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI) (*Release
 
 	client := cfront.NewFromConfig(cfg)
 
-	input := &cfront.GetDistributionInput{
-		Id: &rm.config.BucketName,
-	}
-
-
-
-	u.Step(terminal.StatusOK, "Checking for existing distributions...")
+	u.Update("Checking for existing distributions...")
 	dists, err := GetAllDistributions(context.TODO(), client, &cfront.ListDistributionsInput{})
 
 	if err != nil {
 		u.Step(terminal.StatusError, "Error retrieving distributions")
 		return nil, err
 	}
+
+	u.Update("Searching for distribution belonging to "+rm.config.BucketName+"...")
+
+	var existingDistribution *string
 
 	for _, v := range dists.DistributionList.Items {
 		tagInput := &cfront.ListTagsForResourceInput{
@@ -128,19 +118,23 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI) (*Release
 
 		tags, err := GetDistributionTags(context.TODO(), client, tagInput)
 		if err != nil {
-			u.Step(terminal.StatusError, fmt.Sprintf("Error retrieving tags for %+v", v.ARN))
+			u.Step(terminal.StatusError, fmt.Sprintf("Error retrieving tags for %v", *v.ARN))
 			return nil, err
 		}
 
 		for _, tag := range tags.Tags.Items {
-			u.Step(terminal.StatusOK, fmt.Sprintf("Found the following for %v: %v - %v", *v.ARN, *tag.Key, *tag.Value))
+			if *tag.Key == "bucket" && *tag.Value == rm.config.BucketName {
+				existingDistribution = v.ARN
+			}
 		}
 	}
-	
-	_, err = DistributionExists(context.TODO(), client, input)
-	if err != nil {
-		u.Step(terminal.StatusError, "Error creating distribution for "+rm.config.BucketName)
-		return nil, err
+
+	// TODO: if no existingDistribution, call creation methods (with tag of bucket - BucketName)
+	if existingDistribution == nil {
+		u.Step(terminal.StatusError, fmt.Sprintf("Could not find distribution belonging to %v", rm.config.BucketName))
+	// TODO: if existingDistribution, call update methods
+	} else {
+		u.Step(terminal.StatusOK, fmt.Sprintf("Found the following distribution: %v", *existingDistribution))
 	}
 
 	return &Release{}, nil
