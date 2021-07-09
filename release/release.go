@@ -4,11 +4,43 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	cfront "github.com/aws/aws-sdk-go-v2/service/cloudfront"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 )
 
+// Defines interface for needed Cloudfront functions
+type CloudfrontAPI interface {
+	GetDistribution(
+		ctx context.Context,
+		input *cfront.GetDistributionInput,
+		optFns ...func(*cfront.Options),
+	) (*cfront.GetDistributionOutput, error)
+	ListDistributions(
+		ctx context.Context,
+		input *cfront.ListDistributionsInput,
+		optFns ...func(*cfront.Options),
+	) (*cfront.ListDistributionsOutput, error)
+}
+
+func DistributionExists(
+	c context.Context,
+	api CloudfrontAPI,
+	input *cfront.GetDistributionInput,
+) (*cfront.GetDistributionOutput, error) {
+	return api.GetDistribution(c, input)
+}
+
+func GetAllDistributions(
+	c context.Context,
+	api CloudfrontAPI,
+	input *cfront.ListDistributionsInput,
+) (*cfront.ListDistributionsOutput, error) {
+	return api.ListDistributions(c, input)
+}
+
 type ReleaseConfig struct {
-	Active bool "hcl:directory,optional"
+	BucketName string `hcl:"bucket"`
 }
 
 type ReleaseManager struct {
@@ -39,23 +71,6 @@ func (rm *ReleaseManager) ReleaseFunc() interface{} {
 	return rm.release
 }
 
-// A BuildFunc does not have a strict signature, you can define the parameters
-// you need based on the Available parameters that the Waypoint SDK provides.
-// Waypoint will automatically inject parameters as specified
-// in the signature at run time.
-//
-// Available input parameters:
-// - context.Context
-// - *component.Source
-// - *component.JobInfo
-// - *component.DeploymentConfig
-// - *datadir.Project
-// - *datadir.App
-// - *datadir.Component
-// - hclog.Logger
-// - terminal.UI
-// - *component.LabelSet
-
 // In addition to default input parameters the platform.Deployment from the Deploy step
 // can also be injected.
 //
@@ -69,7 +84,37 @@ func (rm *ReleaseManager) ReleaseFunc() interface{} {
 func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI) (*Release, error) {
 	u := ui.Status()
 	defer u.Close()
-	u.Update("Release application")
+	u.Update("Configuring AWS Cloudfront...")
+
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		u.Step(terminal.StatusError, "AWS configuration error, "+err.Error())
+		return nil, err
+	}
+
+	client := cfront.NewFromConfig(cfg)
+
+	input := &cfront.GetDistributionInput{
+		Id: &rm.config.BucketName,
+	}
+
+
+
+	u.Step(terminal.StatusOK, "Checking for existing distributions...")
+	dists, err := GetAllDistributions(context.TODO(), client, &cfront.ListDistributionsInput{})
+
+	if err != nil {
+		u.Step(terminal.StatusError, "Error retrieving distributions")
+		return nil, err
+	}
+
+	u.Step(terminal.StatusOK, "Found the following: "+fmt.Sprintf("%+v", dists))
+	
+	_, err = DistributionExists(context.TODO(), client, input)
+	if err != nil {
+		u.Step(terminal.StatusError, "Error creating distribution for "+rm.config.BucketName)
+		return nil, err
+	}
 
 	return &Release{}, nil
 }
