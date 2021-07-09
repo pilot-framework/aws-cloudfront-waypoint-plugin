@@ -214,7 +214,9 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 		return nil, err
 	}
 
-	return &Deployment{}, nil
+	return &Deployment{
+		Bucket: p.config.BucketName,
+	}, nil
 }
 
 func getPolicy(b string) string {
