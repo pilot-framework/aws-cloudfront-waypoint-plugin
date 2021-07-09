@@ -3,6 +3,7 @@ package main
 import (
 	sdk "github.com/hashicorp/waypoint-plugin-sdk"
 	"github.com/pilot-framework/aws-cloudfront-waypoint-plugin/platform"
+	"github.com/pilot-framework/aws-cloudfront-waypoint-plugin/release"
 )
 
 func main() {
@@ -14,5 +15,6 @@ func main() {
 		// Comment out any components which are not
 		// required for your plugin
 		&platform.Platform{},
+		&release.ReleaseManager{},
 	))
 }
