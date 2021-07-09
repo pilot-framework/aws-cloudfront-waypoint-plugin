@@ -221,7 +221,9 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 		u.Step(terminal.StatusWarn, "Some static files failed to upload")
 	}
 
-	return &Deployment{}, nil
+	return &Deployment{
+		Bucket: p.config.BucketName,
+	}, nil
 }
 
 func getPolicy(b string) string {
