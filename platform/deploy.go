@@ -1,14 +1,17 @@
 package platform
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 )
 
@@ -157,10 +160,17 @@ func PutObjects(b, subPath string, client *s3.Client, errors *[]string) []string
 
 		defer f.Close()
 
+		// get file size and read file contents into buffer
+		fileInfo, _ := f.Stat()
+		size := fileInfo.Size()
+		buffer := make([]byte, size)
+		f.Read(buffer)
+
 		input := &s3.PutObjectInput{
-			Bucket: &b,
-			Key:    aws.String(subPath + file.Name()),
-			Body:   f,
+			Bucket:      &b,
+			Key:         aws.String(subPath + fileInfo.Name()),
+			Body:        bytes.NewReader(buffer),
+			ContentType: aws.String(DetectMimeType(fileInfo.Name(), buffer)),
 		}
 
 		_, err = AddFile(context.TODO(), client, input)
@@ -241,4 +251,15 @@ func getPolicy(b string) string {
 			}
 		]
 	}`, b)
+}
+
+func DetectMimeType(fname string, buffer []byte) string {
+	if strings.HasSuffix(fname, ".css") {
+		return "text/css"
+	} else if strings.HasSuffix(fname, ".js") {
+		return "application/javascript"
+	} else if strings.HasSuffix(fname, ".map") {
+		return "binary/octet-stream"
+	}
+	return mimetype.Detect(buffer).String()
 }
