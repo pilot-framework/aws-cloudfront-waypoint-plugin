@@ -235,7 +235,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 	if existingDistribution == nil {
 		u.Step("", fmt.Sprintf("Could not find distribution belonging to %v, creating new distribution...", target.Bucket))
 
-		newDistInput := FormatDistributionInput(target.Bucket)
+		newDistInput := FormatDistributionInput(target.Bucket, target.Region)
 
 		newDist, err := CreateDistribution(context.TODO(), client, newDistInput)
 		if err != nil {
