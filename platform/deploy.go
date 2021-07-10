@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	mtype "github.com/gabriel-vasile/mimetype"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 )
 
@@ -157,10 +159,17 @@ func PutObjects(b, subPath string, client *s3.Client, errors *[]string) []string
 
 		defer f.Close()
 
+		// get file size and read file contents into buffer
+		fileInfo, _ := f.Stat()
+		size := fileInfo.Size()
+		buffer := make([]byte, size)
+		f.Read(buffer)
+
 		input := &s3.PutObjectInput{
-			Bucket: &b,
-			Key:    aws.String(subPath + file.Name()),
-			Body:   f,
+			Bucket:      &b,
+			Key:         aws.String(subPath + fileInfo.Name()),
+			Body:        bytes.NewReader(buffer),
+			ContentType: aws.String(mtype.Detect(buffer).String()),
 		}
 
 		_, err = AddFile(context.TODO(), client, input)
