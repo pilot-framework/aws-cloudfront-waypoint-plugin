@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 )
 
@@ -15,6 +17,18 @@ type S3BucketAPI interface {
 	CreateBucket(ctx context.Context,
 		params *s3.CreateBucketInput,
 		optFns ...func(*s3.Options)) (*s3.CreateBucketOutput, error)
+
+	PutBucketPolicy(ctx context.Context,
+		params *s3.PutBucketPolicyInput,
+		optFns ...func(*s3.Options)) (*s3.PutBucketPolicyOutput, error)
+
+	PutBucketWebsite(ctx context.Context,
+		params *s3.PutBucketWebsiteInput,
+		optFns ...func(*s3.Options)) (*s3.PutBucketWebsiteOutput, error)
+
+	PutObject(ctx context.Context,
+		params *s3.PutObjectInput,
+		optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
 }
 
 // MakeBucket creates an Amazon S3 bucket.
@@ -27,6 +41,18 @@ type S3BucketAPI interface {
 //     Otherwise, nil and an error from the call to CreateBucket.
 func MakeBucket(c context.Context, api S3BucketAPI, input *s3.CreateBucketInput) (*s3.CreateBucketOutput, error) {
 	return api.CreateBucket(c, input)
+}
+
+func SetPublicBucketPolicy(c context.Context, api S3BucketAPI, input *s3.PutBucketPolicyInput) (*s3.PutBucketPolicyOutput, error) {
+	return api.PutBucketPolicy(c, input)
+}
+
+func EnableWebHosting(c context.Context, api S3BucketAPI, input *s3.PutBucketWebsiteInput) (*s3.PutBucketWebsiteOutput, error) {
+	return api.PutBucketWebsite(c, input)
+}
+
+func AddFile(c context.Context, api S3BucketAPI, input *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
+	return api.PutObject(c, input)
 }
 
 type PlatformConfig struct {
@@ -78,10 +104,79 @@ func (p *Platform) DeployFunc() interface{} {
 	return p.deploy
 }
 
+func CreateBucket(b string, client *s3.Client) error {
+	input := &s3.CreateBucketInput{
+		Bucket: &b,
+	}
+
+	_, err := MakeBucket(context.TODO(), client, input)
+	return err
+}
+
+func PutBucketPolicy(b string, client *s3.Client) error {
+	input := &s3.PutBucketPolicyInput{
+		Bucket: &b,
+		Policy: aws.String(getPolicy(b)),
+	}
+
+	_, err := SetPublicBucketPolicy(context.TODO(), client, input)
+	return err
+}
+
+func PutBucketWebsite(b string, client *s3.Client) error {
+	input := &s3.PutBucketWebsiteInput{
+		Bucket: &b,
+		WebsiteConfiguration: &types.WebsiteConfiguration{
+			IndexDocument: &types.IndexDocument{Suffix: aws.String("index.html")},
+		},
+	}
+
+	_, err := EnableWebHosting(context.TODO(), client, input)
+	return err
+}
+
+// PutObjects recursively checks for files in build path and uploads
+// to specified s3 bucket. The errors slice keeps track of errors found during upload.
+func PutObjects(b, subPath string, client *s3.Client, errors *[]string) []string {
+	files, err := os.ReadDir("./build/" + subPath)
+	if err != nil {
+		*errors = append(*errors, err.Error())
+	}
+
+	for _, file := range files {
+		if file.IsDir() {
+			PutObjects(b, subPath+file.Name()+"/", client, errors)
+			continue
+		}
+
+		f, err := os.Open("./build/" + subPath + file.Name())
+		if err != nil {
+			*errors = append(*errors, err.Error())
+			continue
+		}
+
+		defer f.Close()
+
+		input := &s3.PutObjectInput{
+			Bucket: &b,
+			Key:    aws.String(subPath + file.Name()),
+			Body:   f,
+		}
+
+		_, err = AddFile(context.TODO(), client, input)
+		if err != nil {
+			*errors = append(*errors, err.Error())
+			continue
+		}
+	}
+
+	return *errors
+}
+
 func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
 	u := ui.Status()
 	defer u.Close()
-	u.Update("Deploy S3 assets")
+	u.Step("", "---Deploying S3 assets---")
 
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
@@ -91,18 +186,58 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 
 	client := s3.NewFromConfig(cfg)
 
-	input := &s3.CreateBucketInput{
-		Bucket: &p.config.BucketName,
-	}
-
-	u.Step(terminal.StatusOK, "Creating bucket "+p.config.BucketName)
-	_, err = MakeBucket(context.TODO(), client, input)
+	u.Step("", "Creating bucket "+p.config.BucketName)
+	err = CreateBucket(p.config.BucketName, client)
 	if err != nil {
 		u.Step(terminal.StatusError, "Could not create bucket "+p.config.BucketName)
 		return nil, err
 	}
 
 	u.Step(terminal.StatusOK, "Bucket created successfully")
+	u.Step("", "Setting bucket permissions")
 
-	return &Deployment{}, nil
+	err = PutBucketPolicy(p.config.BucketName, client)
+	if err != nil {
+		u.Step(terminal.StatusError, "Could not set bucket policy")
+		return nil, err
+	}
+
+	u.Step(terminal.StatusOK, "Bucket policy created")
+	u.Step("", "Enabling static website hosting")
+
+	err = PutBucketWebsite(p.config.BucketName, client)
+	if err != nil {
+		u.Step(terminal.StatusError, "Could not enable static web hosting")
+		return nil, err
+	}
+
+	u.Step(terminal.StatusOK, "Static website hosting enabled")
+	u.Step("", "Pushing static files")
+
+	fileErrors := []string{}
+	PutObjects(p.config.BucketName, "", client, &fileErrors)
+	if len(fileErrors) > 0 {
+		u.Step(terminal.StatusWarn, "Some static files failed to upload")
+	}
+
+	u.Step(terminal.StatusOK, "Upload of static files complete")
+
+	return &Deployment{
+		Bucket: p.config.BucketName,
+	}, nil
+}
+
+func getPolicy(b string) string {
+	return fmt.Sprintf(`{
+		"Version":"2012-10-17",
+		"Statement":[
+			{
+				"Sid":"PublicRead",
+				"Effect":"Allow",
+				"Principal": "*",
+				"Action":["s3:GetObject","s3:GetObjectVersion"],
+				"Resource":["arn:aws:s3:::%s/*"]
+			}
+		]
+	}`, b)
 }

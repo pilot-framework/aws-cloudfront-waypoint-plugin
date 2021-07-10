@@ -8,5 +8,5 @@ option go_package = "github.com/pilot-framework/aws-cloudfront-waypoint-plugin/p
 // You can customise this message to change the fields for
 // the output value from your Deployment
 message Deployment {
-  string id = 1;
+  string bucket = 1;
 }
