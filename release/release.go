@@ -3,13 +3,150 @@ package release
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	cfront "github.com/aws/aws-sdk-go-v2/service/cloudfront"
+	"github.com/aws/aws-sdk-go-v2/service/cloudfront/types"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
+	"github.com/pilot-framework/aws-cloudfront-waypoint-plugin/platform"
 )
 
-type ReleaseConfig struct {
-	Active bool "hcl:directory,optional"
+// Defines interface for needed Cloudfront functions
+type CloudfrontAPI interface {
+	GetDistribution(
+		ctx context.Context,
+		input *cfront.GetDistributionInput,
+		optFns ...func(*cfront.Options),
+	) (*cfront.GetDistributionOutput, error)
+	ListDistributions(
+		ctx context.Context,
+		input *cfront.ListDistributionsInput,
+		optFns ...func(*cfront.Options),
+	) (*cfront.ListDistributionsOutput, error)
+	ListTagsForResource(
+		ctx context.Context,
+		input *cfront.ListTagsForResourceInput,
+		optFns ...func(*cfront.Options),
+	) (*cfront.ListTagsForResourceOutput, error)
+	CreateDistributionWithTags(
+		ctx context.Context,
+		input *cfront.CreateDistributionWithTagsInput,
+		optFns ...func(*cfront.Options),
+	) (*cfront.CreateDistributionWithTagsOutput, error)
+	CreateOriginRequestPolicy(
+		ctx context.Context,
+		input *cfront.CreateOriginRequestPolicyInput,
+		optFns ...func(*cfront.Options),
+	) (*cfront.CreateOriginRequestPolicyOutput, error)
 }
+
+func GetAllDistributions(
+	c context.Context,
+	api CloudfrontAPI,
+	input *cfront.ListDistributionsInput,
+) (*cfront.ListDistributionsOutput, error) {
+	return api.ListDistributions(c, input)
+}
+
+func GetDistributionTags(
+	c context.Context,
+	api CloudfrontAPI,
+	input *cfront.ListTagsForResourceInput,
+) (*cfront.ListTagsForResourceOutput, error) {
+	return api.ListTagsForResource(c, input)
+}
+
+func CreateDistribution(
+	c context.Context,
+	api CloudfrontAPI,
+	input *cfront.CreateDistributionWithTagsInput,
+) (*cfront.CreateDistributionWithTagsOutput, error) {
+	return api.CreateDistributionWithTags(c, input)
+}
+
+func CreateOrigin(
+	c context.Context,
+	api CloudfrontAPI,
+	input *cfront.CreateOriginRequestPolicyInput,
+) (*cfront.CreateOriginRequestPolicyOutput, error) {
+	return api.CreateOriginRequestPolicy(c, input)
+}
+
+// This function will create the configuration needed to create a new origin
+func FormatOrigin(bucket string) (types.Origin) {
+	var http int32 = 80
+	var https int32 = 443
+	var keepAlive int32 = 5
+	var readTimeout int32 = 30
+
+	config := &types.CustomOriginConfig{
+		HTTPPort: &http,
+		HTTPSPort: &https,
+		OriginKeepaliveTimeout: &keepAlive,
+		OriginProtocolPolicy: types.OriginProtocolPolicyMatchViewer,
+		OriginReadTimeout: &readTimeout,
+	}
+
+	var connAttempts int32 = 3
+	var connTimeout int32 = 10
+	var domainName string = fmt.Sprintf("%v.S3.amazonaws.com", bucket)
+	var originId string = fmt.Sprintf("pilot-origin-%v", bucket)
+	origin := types.Origin{
+		ConnectionAttempts: &connAttempts,
+		ConnectionTimeout: &connTimeout,
+		CustomOriginConfig: config,
+		DomainName: &domainName,
+		Id: &originId,
+	}
+
+	return origin
+}
+
+// This function will create the configuration input needed to create a new distribution
+func FormatDistributionInput(bucket string) (*cfront.CreateDistributionWithTagsInput) {
+	// These are the tags that the distribution will have
+	// by default we include a bucket - bucket_name k/v to check if a distribution exists
+	tagKey := "bucket"
+	items := [](types.Tag){
+		types.Tag{Key: &tagKey, Value: &bucket},
+	}
+
+	callRef := fmt.Sprintf("pilot-ref-%v", time.Now()) // unique identifier for the request
+	comment := "This distribution was created via Pilot"
+	enabled := true
+	var quantity int32 = 1
+	// var ttl int64 = 0 // all headers are forwarded so this must be zero
+	origin := FormatOrigin(bucket)
+	// this is the ID for the Managed-CachingOptimized policy
+	cachePolicy := "658327ea-f89d-4fab-a63d-7e88639e58f6"
+
+	input := &cfront.CreateDistributionWithTagsInput{
+		DistributionConfigWithTags: &types.DistributionConfigWithTags{
+			DistributionConfig: &types.DistributionConfig{
+				CallerReference: &callRef,
+				Comment: &comment,
+				DefaultCacheBehavior: &types.DefaultCacheBehavior{
+					TargetOriginId: origin.Id,
+					ViewerProtocolPolicy: types.ViewerProtocolPolicyAllowAll,
+					CachePolicyId: &cachePolicy,
+				},
+				Enabled: &enabled,
+				Origins: &types.Origins{
+					Quantity: &quantity,
+					Items: [](types.Origin){origin},
+				},
+			},
+			Tags: &types.Tags{
+				Items: items,
+			},
+		},
+	}
+
+	return input
+}
+
+type ReleaseConfig struct {}
 
 type ReleaseManager struct {
 	config ReleaseConfig
@@ -39,23 +176,6 @@ func (rm *ReleaseManager) ReleaseFunc() interface{} {
 	return rm.release
 }
 
-// A BuildFunc does not have a strict signature, you can define the parameters
-// you need based on the Available parameters that the Waypoint SDK provides.
-// Waypoint will automatically inject parameters as specified
-// in the signature at run time.
-//
-// Available input parameters:
-// - context.Context
-// - *component.Source
-// - *component.JobInfo
-// - *component.DeploymentConfig
-// - *datadir.Project
-// - *datadir.App
-// - *datadir.Component
-// - hclog.Logger
-// - terminal.UI
-// - *component.LabelSet
-
 // In addition to default input parameters the platform.Deployment from the Deploy step
 // can also be injected.
 //
@@ -66,10 +186,73 @@ func (rm *ReleaseManager) ReleaseFunc() interface{} {
 //
 // If an error is returned, Waypoint stops the execution flow and
 // returns an error to the user.
-func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI) (*Release, error) {
+func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *platform.Deployment) (*Release, error) {
 	u := ui.Status()
 	defer u.Close()
-	u.Update("Release application")
+	u.Step("", "--- Configuring AWS Cloudfront ---")
 
-	return &Release{}, nil
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		u.Step(terminal.StatusError, "AWS configuration error, "+err.Error())
+		return nil, err
+	}
+
+	client := cfront.NewFromConfig(cfg)
+
+	u.Update("Checking for existing distributions...")
+	dists, err := GetAllDistributions(context.TODO(), client, &cfront.ListDistributionsInput{})
+
+	if err != nil {
+		u.Step(terminal.StatusError, "Error retrieving distributions")
+		return nil, err
+	}
+
+	u.Update("Searching for distribution belonging to "+target.Bucket+"...")
+
+	var existingDistribution *string
+
+	for _, v := range dists.DistributionList.Items {
+		tagInput := &cfront.ListTagsForResourceInput{
+			Resource: v.ARN,
+		}
+
+		tags, err := GetDistributionTags(context.TODO(), client, tagInput)
+		if err != nil {
+			u.Step(terminal.StatusError, fmt.Sprintf("Error retrieving tags for %v", *v.ARN))
+			return nil, err
+		}
+
+		for _, tag := range tags.Tags.Items {
+			if *tag.Key == "bucket" && *tag.Value == target.Bucket {
+				existingDistribution = v.ARN
+			}
+		}
+	}
+
+	var distUrl string
+
+	// TODO: if no existingDistribution, call creation methods (with tag of bucket - BucketName)
+	if existingDistribution == nil {
+		u.Step("", fmt.Sprintf("Could not find distribution belonging to %v, creating new distribution...", target.Bucket))
+
+		newDistInput := FormatDistributionInput(target.Bucket)
+
+		newDist, err := CreateDistribution(context.TODO(), client, newDistInput)
+		if err != nil {
+			u.Step(terminal.StatusError, fmt.Sprintf("Error creating distribution: %v", err.Error()))
+
+			return nil, err
+		}
+
+		distUrl = *newDist.Distribution.DomainName
+
+		u.Step(terminal.StatusOK, fmt.Sprintf("Successfully created distribution %v", *newDist.Distribution.Id))
+	// TODO: if existingDistribution, call update methods
+	} else {
+		u.Step(terminal.StatusOK, fmt.Sprintf("Found an existing distribution for %v", target.Bucket))
+	}
+
+	return &Release{
+		Url: distUrl,
+	}, nil
 }
