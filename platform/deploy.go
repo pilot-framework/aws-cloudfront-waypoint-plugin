@@ -224,6 +224,7 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 
 	return &Deployment{
 		Bucket: p.config.BucketName,
+		Region: p.config.Region,
 	}, nil
 }
 

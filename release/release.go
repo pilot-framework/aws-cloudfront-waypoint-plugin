@@ -74,7 +74,7 @@ func CreateOrigin(
 }
 
 // This function will create the configuration needed to create a new origin
-func FormatOrigin(bucket string) (types.Origin) {
+func FormatOrigin(bucket string, region string) (types.Origin) {
 	var http int32 = 80
 	var https int32 = 443
 	var keepAlive int32 = 5
@@ -90,7 +90,7 @@ func FormatOrigin(bucket string) (types.Origin) {
 
 	var connAttempts int32 = 3
 	var connTimeout int32 = 10
-	var domainName string = fmt.Sprintf("%v.S3.amazonaws.com", bucket)
+	var domainName string = fmt.Sprintf("%v.s3.%v.amazonaws.com", bucket, region)
 	var originId string = fmt.Sprintf("pilot-origin-%v", bucket)
 	origin := types.Origin{
 		ConnectionAttempts: &connAttempts,
@@ -104,7 +104,7 @@ func FormatOrigin(bucket string) (types.Origin) {
 }
 
 // This function will create the configuration input needed to create a new distribution
-func FormatDistributionInput(bucket string) (*cfront.CreateDistributionWithTagsInput) {
+func FormatDistributionInput(bucket string, region string) (*cfront.CreateDistributionWithTagsInput) {
 	// These are the tags that the distribution will have
 	// by default we include a bucket - bucket_name k/v to check if a distribution exists
 	tagKey := "bucket"
@@ -117,7 +117,7 @@ func FormatDistributionInput(bucket string) (*cfront.CreateDistributionWithTagsI
 	enabled := true
 	var quantity int32 = 1
 	// var ttl int64 = 0 // all headers are forwarded so this must be zero
-	origin := FormatOrigin(bucket)
+	origin := FormatOrigin(bucket, region)
 	// this is the ID for the Managed-CachingOptimized policy
 	cachePolicy := "658327ea-f89d-4fab-a63d-7e88639e58f6"
 
@@ -235,7 +235,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 	if existingDistribution == nil {
 		u.Step("", fmt.Sprintf("Could not find distribution belonging to %v, creating new distribution...", target.Bucket))
 
-		newDistInput := FormatDistributionInput(target.Bucket)
+		newDistInput := FormatDistributionInput(target.Bucket, target.Region)
 
 		newDist, err := CreateDistribution(context.TODO(), client, newDistInput)
 		if err != nil {
