@@ -8,5 +8,5 @@ option go_package = "github.com/pilot-framework/aws-cloudfront-waypoint-plugin/r
 // You can customise this message to change the fields for
 // the output value from your ReleaseManager
 message Release {
-  string id = 1;
+  string url = 1;
 }

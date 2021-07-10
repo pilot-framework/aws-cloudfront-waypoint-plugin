@@ -34,6 +34,11 @@ type CloudfrontAPI interface {
 		input *cfront.CreateDistributionWithTagsInput,
 		optFns ...func(*cfront.Options),
 	) (*cfront.CreateDistributionWithTagsOutput, error)
+	CreateOriginRequestPolicy(
+		ctx context.Context,
+		input *cfront.CreateOriginRequestPolicyInput,
+		optFns ...func(*cfront.Options),
+	) (*cfront.CreateOriginRequestPolicyOutput, error)
 }
 
 func GetAllDistributions(
@@ -60,21 +65,61 @@ func CreateDistribution(
 	return api.CreateDistributionWithTags(c, input)
 }
 
+func CreateOrigin(
+	c context.Context,
+	api CloudfrontAPI,
+	input *cfront.CreateOriginRequestPolicyInput,
+) (*cfront.CreateOriginRequestPolicyOutput, error) {
+	return api.CreateOriginRequestPolicy(c, input)
+}
+
+// This function will create the configuration needed to create a new origin
+func FormatOrigin(bucket string) (types.Origin) {
+	var http int32 = 80
+	var https int32 = 443
+	var keepAlive int32 = 5
+	var readTimeout int32 = 30
+
+	config := &types.CustomOriginConfig{
+		HTTPPort: &http,
+		HTTPSPort: &https,
+		OriginKeepaliveTimeout: &keepAlive,
+		OriginProtocolPolicy: types.OriginProtocolPolicyMatchViewer,
+		OriginReadTimeout: &readTimeout,
+	}
+
+	var connAttempts int32 = 3
+	var connTimeout int32 = 10
+	var domainName string = fmt.Sprintf("%v.S3.amazonaws.com", bucket)
+	var originId string = fmt.Sprintf("pilot-origin-%v", bucket)
+	origin := types.Origin{
+		ConnectionAttempts: &connAttempts,
+		ConnectionTimeout: &connTimeout,
+		CustomOriginConfig: config,
+		DomainName: &domainName,
+		Id: &originId,
+	}
+
+	return origin
+}
+
+// This function will create the configuration input needed to create a new distribution
 func FormatDistributionInput(bucket string) (*cfront.CreateDistributionWithTagsInput) {
+	// These are the tags that the distribution will have
+	// by default we include a bucket - bucket_name k/v to check if a distribution exists
 	tagKey := "bucket"
 	items := [](types.Tag){
 		types.Tag{Key: &tagKey, Value: &bucket},
 	}
 
-	callRef := fmt.Sprintf("pilot-ref-%v", time.Now())
+	callRef := fmt.Sprintf("pilot-ref-%v", time.Now()) // unique identifier for the request
 	comment := "This distribution was created via Pilot"
-	enabled := false
-	originId := "pilot-origin"
-	var viewPolicy types.ViewerProtocolPolicy
-	viewPolicy = types.ViewerProtocolPolicyAllowAll
+	enabled := true
 	var quantity int32 = 1
-	domainName := "pilot-" + bucket
-
+	// var ttl int64 = 0 // all headers are forwarded so this must be zero
+	origin := FormatOrigin(bucket)
+	// this is the ID for the Managed-CachingOptimized policy
+	cachePolicy := "658327ea-f89d-4fab-a63d-7e88639e58f6"
 
 	input := &cfront.CreateDistributionWithTagsInput{
 		DistributionConfigWithTags: &types.DistributionConfigWithTags{
@@ -82,18 +127,14 @@ func FormatDistributionInput(bucket string) (*cfront.CreateDistributionWithTagsI
 				CallerReference: &callRef,
 				Comment: &comment,
 				DefaultCacheBehavior: &types.DefaultCacheBehavior{
-					TargetOriginId: &originId,
-					ViewerProtocolPolicy: viewPolicy,
+					TargetOriginId: origin.Id,
+					ViewerProtocolPolicy: types.ViewerProtocolPolicyAllowAll,
+					CachePolicyId: &cachePolicy,
 				},
 				Enabled: &enabled,
 				Origins: &types.Origins{
 					Quantity: &quantity,
-					Items: [](types.Origin){
-						types.Origin{
-							Id: &originId,
-							DomainName: &domainName,
-						},
-					},
+					Items: [](types.Origin){origin},
 				},
 			},
 			Tags: &types.Tags{
@@ -188,22 +229,30 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 		}
 	}
 
+	var distUrl string
+
 	// TODO: if no existingDistribution, call creation methods (with tag of bucket - BucketName)
 	if existingDistribution == nil {
 		u.Step("", fmt.Sprintf("Could not find distribution belonging to %v, creating new distribution...", target.Bucket))
 
 		newDistInput := FormatDistributionInput(target.Bucket)
 
-		_, err := CreateDistribution(context.TODO(), client, newDistInput)
+		newDist, err := CreateDistribution(context.TODO(), client, newDistInput)
 		if err != nil {
 			u.Step(terminal.StatusError, fmt.Sprintf("Error creating distribution: %v", err.Error()))
 
 			return nil, err
 		}
+
+		distUrl = *newDist.Distribution.DomainName
+
+		u.Step(terminal.StatusOK, fmt.Sprintf("Successfully created distribution %v", *newDist.Distribution.Id))
 	// TODO: if existingDistribution, call update methods
 	} else {
-		u.Step(terminal.StatusOK, fmt.Sprintf("Found the following distribution: %v", *existingDistribution))
+		u.Step(terminal.StatusOK, fmt.Sprintf("Found an existing distribution for %v", target.Bucket))
 	}
 
-	return &Release{}, nil
+	return &Release{
+		Url: distUrl,
+	}, nil
 }
