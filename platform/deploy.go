@@ -107,9 +107,12 @@ func (p *Platform) DeployFunc() interface{} {
 	return p.deploy
 }
 
-func CreateBucket(b string, client *s3.Client) error {
+func CreateBucket(p *Platform, client *s3.Client) error {
 	input := &s3.CreateBucketInput{
-		Bucket: &b,
+		Bucket: &p.config.BucketName,
+		CreateBucketConfiguration: &types.CreateBucketConfiguration{
+			LocationConstraint: types.BucketLocationConstraint(p.config.Region),
+		},
 	}
 
 	_, err := MakeBucket(context.TODO(), client, input)
@@ -188,7 +191,7 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	defer u.Close()
 	u.Step("", "---Deploying S3 assets---")
 
-	cfg, err := config.LoadDefaultConfig(context.TODO())
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(p.config.Region))
 	if err != nil {
 		u.Step(terminal.StatusError, "AWS configuration error, "+err.Error())
 		return nil, err
@@ -197,7 +200,7 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	client := s3.NewFromConfig(cfg)
 
 	u.Step("", "Creating bucket "+p.config.BucketName)
-	err = CreateBucket(p.config.BucketName, client)
+	err = CreateBucket(p, client)
 	if err != nil {
 		u.Step(terminal.StatusError, "Could not create bucket "+p.config.BucketName)
 		return nil, err
