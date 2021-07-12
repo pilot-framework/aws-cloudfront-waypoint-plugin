@@ -107,12 +107,16 @@ func (p *Platform) DeployFunc() interface{} {
 	return p.deploy
 }
 
+// TODO: Check for existing bucket and if exists don't error
 func CreateBucket(p *Platform, client *s3.Client) error {
 	input := &s3.CreateBucketInput{
 		Bucket: &p.config.BucketName,
-		CreateBucketConfiguration: &types.CreateBucketConfiguration{
+	}
+
+	if p.config.Region != "us-east-1" {
+		input.CreateBucketConfiguration = &types.CreateBucketConfiguration{
 			LocationConstraint: types.BucketLocationConstraint(p.config.Region),
-		},
+		}
 	}
 
 	_, err := MakeBucket(context.TODO(), client, input)
