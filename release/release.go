@@ -90,7 +90,7 @@ func FormatOrigin(bucket string, region string, root string) (types.Origin) {
 
 	var connAttempts int32 = 3
 	var connTimeout int32 = 10
-	var domainName string = fmt.Sprintf("%v.s3.%v.amazonaws.com", bucket, region)
+	var domainName string = fmt.Sprintf("%v.s3-website-%v.amazonaws.com", bucket, region)
 	var originId string = fmt.Sprintf("pilot-origin-%v", bucket)
 	var originPath string = root
 	origin := types.Origin{
@@ -149,7 +149,7 @@ func FormatDistributionInput(bucket string, region string, root string) (*cfront
 
 type ReleaseConfig struct {
 	// This is the Origin Path that the CDN will treat as `/`
-	// default is `/index.html`
+	// default is a 1-1 forward to `/`
 	Root string `hcl:"root,optional"`
 }
 
@@ -195,10 +195,6 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 	u := ui.Status()
 	defer u.Close()
 	u.Step("", "--- Configuring AWS Cloudfront ---")
-
-	if rm.config.Root == "" {
-		rm.config.Root = "/index.html"
-	}
 
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
