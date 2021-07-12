@@ -195,7 +195,7 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	defer u.Close()
 	u.Step("", "---Deploying S3 assets---")
 
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(p.config.Region))
+	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
 		u.Step(terminal.StatusError, "AWS configuration error, "+err.Error())
 		return nil, err
