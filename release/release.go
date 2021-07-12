@@ -74,7 +74,7 @@ func CreateOrigin(
 }
 
 // This function will create the configuration needed to create a new origin
-func FormatOrigin(bucket string, region string) (types.Origin) {
+func FormatOrigin(bucket string, region string, root string) (types.Origin) {
 	var http int32 = 80
 	var https int32 = 443
 	var keepAlive int32 = 5
@@ -92,19 +92,21 @@ func FormatOrigin(bucket string, region string) (types.Origin) {
 	var connTimeout int32 = 10
 	var domainName string = fmt.Sprintf("%v.s3.%v.amazonaws.com", bucket, region)
 	var originId string = fmt.Sprintf("pilot-origin-%v", bucket)
+	var originPath string = root
 	origin := types.Origin{
 		ConnectionAttempts: &connAttempts,
 		ConnectionTimeout: &connTimeout,
 		CustomOriginConfig: config,
 		DomainName: &domainName,
 		Id: &originId,
+		OriginPath: &originPath,
 	}
 
 	return origin
 }
 
 // This function will create the configuration input needed to create a new distribution
-func FormatDistributionInput(bucket string, region string) (*cfront.CreateDistributionWithTagsInput) {
+func FormatDistributionInput(bucket string, region string, root string) (*cfront.CreateDistributionWithTagsInput) {
 	// These are the tags that the distribution will have
 	// by default we include a bucket - bucket_name k/v to check if a distribution exists
 	tagKey := "bucket"
@@ -116,8 +118,7 @@ func FormatDistributionInput(bucket string, region string) (*cfront.CreateDistri
 	comment := "This distribution was created via Pilot"
 	enabled := true
 	var quantity int32 = 1
-	// var ttl int64 = 0 // all headers are forwarded so this must be zero
-	origin := FormatOrigin(bucket, region)
+	origin := FormatOrigin(bucket, region, root)
 	// this is the ID for the Managed-CachingOptimized policy
 	cachePolicy := "658327ea-f89d-4fab-a63d-7e88639e58f6"
 
@@ -146,7 +147,11 @@ func FormatDistributionInput(bucket string, region string) (*cfront.CreateDistri
 	return input
 }
 
-type ReleaseConfig struct {}
+type ReleaseConfig struct {
+	// This is the Origin Path that the CDN will treat as `/`
+	// default is `/index.html`
+	Root string `hcl:"root,optional"`
+}
 
 type ReleaseManager struct {
 	config ReleaseConfig
@@ -191,6 +196,10 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 	defer u.Close()
 	u.Step("", "--- Configuring AWS Cloudfront ---")
 
+	if rm.config.Root == "" {
+		rm.config.Root = "/index.html"
+	}
+
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
 		u.Step(terminal.StatusError, "AWS configuration error, "+err.Error())
@@ -209,7 +218,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 
 	u.Update("Searching for distribution belonging to "+target.Bucket+"...")
 
-	var existingDistribution *string
+	distExists := false
 
 	for _, v := range dists.DistributionList.Items {
 		tagInput := &cfront.ListTagsForResourceInput{
@@ -224,18 +233,16 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 
 		for _, tag := range tags.Tags.Items {
 			if *tag.Key == "bucket" && *tag.Value == target.Bucket {
-				existingDistribution = v.ARN
+				distExists = true
+				break
 			}
 		}
 	}
 
-	var distUrl string
-
-	// TODO: if no existingDistribution, call creation methods (with tag of bucket - BucketName)
-	if existingDistribution == nil {
+	if !distExists {
 		u.Step("", fmt.Sprintf("Could not find distribution belonging to %v, creating new distribution...", target.Bucket))
 
-		newDistInput := FormatDistributionInput(target.Bucket, target.Region)
+		newDistInput := FormatDistributionInput(target.Bucket, target.Region, rm.config.Root)
 
 		newDist, err := CreateDistribution(context.TODO(), client, newDistInput)
 		if err != nil {
@@ -244,15 +251,15 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 			return nil, err
 		}
 
-		distUrl = *newDist.Distribution.DomainName
-
-		u.Step(terminal.StatusOK, fmt.Sprintf("Successfully created distribution %v", *newDist.Distribution.Id))
-	// TODO: if existingDistribution, call update methods
+		u.Step(terminal.StatusOK,
+			fmt.Sprintf(
+				"Successfully created distribution %v.\nCloudfront URL: %v\nPlease note it may take a few minutes for changes to propagate.",
+				*newDist.Distribution.Id,
+				*newDist.Distribution.DomainName,
+			))
 	} else {
 		u.Step(terminal.StatusOK, fmt.Sprintf("Found an existing distribution for %v", target.Bucket))
 	}
 
-	return &Release{
-		Url: distUrl,
-	}, nil
+	return &Release{}, nil
 }
