@@ -84,7 +84,7 @@ func FormatOrigin(bucket string, region string, root string) (types.Origin) {
 		HTTPPort: &http,
 		HTTPSPort: &https,
 		OriginKeepaliveTimeout: &keepAlive,
-		OriginProtocolPolicy: types.OriginProtocolPolicyMatchViewer,
+		OriginProtocolPolicy: types.OriginProtocolPolicyHttpOnly,
 		OriginReadTimeout: &readTimeout,
 	}
 
