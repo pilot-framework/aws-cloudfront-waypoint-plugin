@@ -130,6 +130,7 @@ func CreateBucket(p *Platform, client *s3.Client) error {
 	return err
 }
 
+// BucketExists checks for http status code 409 (conflict)
 func BucketExists(err error) bool {
 	return strings.Contains(err.Error(), "409")
 }
