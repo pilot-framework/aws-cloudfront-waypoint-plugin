@@ -32,6 +32,10 @@ type S3BucketAPI interface {
 	PutObject(ctx context.Context,
 		params *s3.PutObjectInput,
 		optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
+
+	GetBucketAcl(ctx context.Context,
+		params *s3.GetBucketAclInput,
+		optFns ...func(*s3.Options)) (*s3.GetBucketAclOutput, error)
 }
 
 // MakeBucket creates an Amazon S3 bucket.
@@ -44,6 +48,10 @@ type S3BucketAPI interface {
 //     Otherwise, nil and an error from the call to CreateBucket.
 func MakeBucket(c context.Context, api S3BucketAPI, input *s3.CreateBucketInput) (*s3.CreateBucketOutput, error) {
 	return api.CreateBucket(c, input)
+}
+
+func GetAcl(c context.Context, api S3BucketAPI, input *s3.GetBucketAclInput) (*s3.GetBucketAclOutput, error) {
+	return api.GetBucketAcl(c, input)
 }
 
 func SetPublicBucketPolicy(c context.Context, api S3BucketAPI, input *s3.PutBucketPolicyInput) (*s3.PutBucketPolicyOutput, error) {
@@ -107,13 +115,24 @@ func (p *Platform) DeployFunc() interface{} {
 	return p.deploy
 }
 
-func CreateBucket(b string, client *s3.Client) error {
+func CreateBucket(p *Platform, client *s3.Client) error {
 	input := &s3.CreateBucketInput{
-		Bucket: &b,
+		Bucket: &p.config.BucketName,
+	}
+
+	if p.config.Region != "us-east-1" {
+		input.CreateBucketConfiguration = &types.CreateBucketConfiguration{
+			LocationConstraint: types.BucketLocationConstraint(p.config.Region),
+		}
 	}
 
 	_, err := MakeBucket(context.TODO(), client, input)
 	return err
+}
+
+// BucketExists checks for http status code 409 (conflict)
+func BucketExists(err error) bool {
+	return strings.Contains(err.Error(), "409")
 }
 
 func PutBucketPolicy(b string, client *s3.Client) error {
@@ -188,7 +207,7 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	defer u.Close()
 	u.Step("", "---Deploying S3 assets---")
 
-	cfg, err := config.LoadDefaultConfig(context.TODO())
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(p.config.Region))
 	if err != nil {
 		u.Step(terminal.StatusError, "AWS configuration error, "+err.Error())
 		return nil, err
@@ -196,14 +215,18 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 
 	client := s3.NewFromConfig(cfg)
 
-	u.Step("", "Creating bucket "+p.config.BucketName)
-	err = CreateBucket(p.config.BucketName, client)
+	u.Step("", "Attempting to create bucket "+p.config.BucketName)
+	err = CreateBucket(p, client)
 	if err != nil {
-		u.Step(terminal.StatusError, "Could not create bucket "+p.config.BucketName)
-		return nil, err
+		if BucketExists(err) {
+			u.Step(terminal.StatusOK, "Found existing bucket")
+		} else {
+			u.Step(terminal.StatusError, "Could not create bucket "+p.config.BucketName)
+			return nil, err
+		}
 	}
-
 	u.Step(terminal.StatusOK, "Bucket created successfully")
+
 	u.Step("", "Setting bucket permissions")
 
 	err = PutBucketPolicy(p.config.BucketName, client)
