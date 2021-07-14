@@ -72,6 +72,8 @@ type PlatformConfig struct {
 
 	// Name of S3 bucket to create
 	BucketName string `hcl:"bucket"`
+	// Where build directory is located
+	BuildDir string `hcl:"directory"`
 }
 
 type Platform struct {
@@ -91,7 +93,7 @@ func (p *Platform) ConfigSet(config interface{}) error {
 		return fmt.Errorf("expected *PlatformConfig as parameter")
 	}
 
-	_, err := os.Stat("./build")
+	_, err := os.Stat(c.BuildDir)
 
 	// validate the config
 	if err != nil {
@@ -158,19 +160,19 @@ func PutBucketWebsite(b string, client *s3.Client) error {
 
 // PutObjects recursively checks for files in build path and uploads
 // to specified s3 bucket. The errors slice keeps track of errors found during upload.
-func PutObjects(b, subPath string, client *s3.Client, errors *[]string) []string {
-	files, err := os.ReadDir("./build/" + subPath)
+func PutObjects(b, buildDir, subPath string, client *s3.Client, errors *[]string) []string {
+	files, err := os.ReadDir(buildDir + subPath)
 	if err != nil {
 		*errors = append(*errors, err.Error())
 	}
 
 	for _, file := range files {
 		if file.IsDir() {
-			PutObjects(b, subPath+file.Name()+"/", client, errors)
+			PutObjects(b, buildDir, subPath+file.Name()+"/", client, errors)
 			continue
 		}
 
-		f, err := os.Open("./build/" + subPath + file.Name())
+		f, err := os.Open(buildDir + subPath + file.Name())
 		if err != nil {
 			*errors = append(*errors, err.Error())
 			continue
@@ -247,7 +249,7 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	u.Step("", "Pushing static files")
 
 	fileErrors := []string{}
-	PutObjects(p.config.BucketName, "", client, &fileErrors)
+	PutObjects(p.config.BucketName, p.config.BuildDir, "", client, &fileErrors)
 	if len(fileErrors) > 0 {
 		u.Step(terminal.StatusWarn, "Some static files failed to upload")
 	}
