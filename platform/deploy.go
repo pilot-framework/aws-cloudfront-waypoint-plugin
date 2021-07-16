@@ -133,7 +133,7 @@ func CreateBucket(p *Platform, client *s3.Client) error {
 }
 
 func BucketExists(err error) bool {
-	return strings.Contains(err.Error(), "NoSuchBucket")
+	return strings.Contains(err.Error(), "NoSuchBucket") || strings.Contains(err.Error(), "BucketAlreadyOwnedByYou")
 }
 
 func PutBucketPolicy(b string, client *s3.Client) error {
