@@ -90,7 +90,7 @@ func FormatOrigin(bucket string, region string, root string) (types.Origin) {
 
 	var connAttempts int32 = 3
 	var connTimeout int32 = 10
-	var domainName string = fmt.Sprintf("%v.s3-website-%v.amazonaws.com", bucket, region)
+	var domainName string = fmt.Sprintf("%v.s3-website.%v.amazonaws.com", bucket, region)
 	var originId string = fmt.Sprintf("pilot-origin-%v", bucket)
 	var originPath string = root
 	origin := types.Origin{
