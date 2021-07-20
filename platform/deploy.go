@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -74,6 +75,7 @@ type PlatformConfig struct {
 	BucketName string `hcl:"bucket"`
 	// Where build directory is located
 	BuildDir string `hcl:"directory"`
+	BaseDir string `hcl:"base,optional"`
 }
 
 type Platform struct {
@@ -93,7 +95,28 @@ func (p *Platform) ConfigSet(config interface{}) error {
 		return fmt.Errorf("expected *PlatformConfig as parameter")
 	}
 
-	_, err := os.Stat(c.BuildDir)
+	tmpFiles, err := os.ReadDir("/tmp")
+	if err != nil {
+		return fmt.Errorf("Error accessing tmp directory")
+	}
+
+	tmpDir := ""
+
+	for _, file := range tmpFiles {
+		if file.IsDir() && strings.Contains(file.Name(), "waypoint") {
+			tmpDir = file.Name()
+			break
+		}
+	}
+
+	if tmpDir == "" {
+		return fmt.Errorf("Could not find tmp directory for this project")
+	}
+
+	c.BaseDir = path.Join("/tmp", tmpDir)
+	c.BuildDir = path.Join(c.BaseDir, strings.TrimLeft(c.BuildDir, "./"))
+
+	_, err = os.Stat(c.BuildDir)
 
 	// validate the config
 	if err != nil {
