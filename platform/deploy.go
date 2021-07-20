@@ -120,7 +120,7 @@ func (p *Platform) ConfigSet(config interface{}) error {
 
 	// validate the config
 	if err != nil {
-		return fmt.Errorf("no build directory exists")
+		return fmt.Errorf("no build directory exists, got: %v", c.BuildDir)
 	}
 
 	if c.Region == "" {
