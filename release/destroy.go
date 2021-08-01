@@ -49,5 +49,13 @@ func (rm *ReleaseManager) destroy(ctx context.Context, ui terminal.UI, release *
 
 	u.Step(terminal.StatusOK, "Distribution disabled")
 
+	u.Update("Deleting distribution...")
+
+	err = cfront.RemoveDistribution(release.Id, client)
+
+	if err != nil {
+		return err
+	}
+
 	return nil
 }

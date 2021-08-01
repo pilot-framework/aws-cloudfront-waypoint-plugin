@@ -205,6 +205,29 @@ func FormatDistributionInput(bucket string, region string, root string) *cloudfr
 	return input
 }
 
+func RemoveDistribution(id string, client *cloudfront.Client) error {
+	distInput := &cloudfront.GetDistributionInput{
+		Id: &id,
+	}
+
+	dist, err := GetDistribution(context.TODO(), client, distInput)
+	if err != nil {
+		return err
+	}
+
+	delInput := &cloudfront.DeleteDistributionInput{
+		Id:      &id,
+		IfMatch: dist.ETag,
+	}
+
+	_, err = DeleteDistribution(context.TODO(), client, delInput)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func DisableDistribution(id string, client *cloudfront.Client) error {
 	getCfgInput := &cloudfront.GetDistributionConfigInput{
 		Id: &id,
