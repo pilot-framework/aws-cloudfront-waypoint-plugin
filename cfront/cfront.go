@@ -205,14 +205,19 @@ func FormatDistributionInput(bucket string, region string, root string) *cloudfr
 	return input
 }
 
-func RemoveDistribution(id string, client *cloudfront.Client) error {
+func RemoveDistribution(id string, client *cloudfront.Client) {
+	status, err := PollStatus(id, client)
+	if err != nil {
+		panic(err)
+	}
+
 	distInput := &cloudfront.GetDistributionInput{
 		Id: &id,
 	}
 
 	dist, err := GetDistribution(context.TODO(), client, distInput)
 	if err != nil {
-		return err
+		panic(err)
 	}
 
 	delInput := &cloudfront.DeleteDistributionInput{
@@ -220,12 +225,12 @@ func RemoveDistribution(id string, client *cloudfront.Client) error {
 		IfMatch: dist.ETag,
 	}
 
-	_, err = DeleteDistribution(context.TODO(), client, delInput)
-	if err != nil {
-		return err
+	if status {
+		_, err = DeleteDistribution(context.TODO(), client, delInput)
+		if err != nil {
+			panic(err)
+		}
 	}
-
-	return nil
 }
 
 func DisableDistribution(id string, client *cloudfront.Client) error {
@@ -256,45 +261,33 @@ func DisableDistribution(id string, client *cloudfront.Client) error {
 	return nil
 }
 
-func PollStatus(id string, client *cloudfront.Client, s chan<- bool, e chan<- error) {
+func PollStatus(id string, client *cloudfront.Client) (status bool, err error) {
 	distInput := &cloudfront.GetDistributionInput{
 		Id: &id,
 	}
 
 	timedOut := true
-	status := false
-	var err error
+	status = false
 
-	// times out after ten minutes
-	for i := 0; i < 40; i++ {
-		fmt.Println("IN GOROUTINE, ITER: ", i)
+	// times out after five minutes
+	for i := 0; i < 30; i++ {
 		dist, getErr := GetDistribution(context.TODO(), client, distInput)
-		if err != nil {
+		if getErr != nil {
 			err = getErr
-			break
+			return
 		}
 
 		if strings.ToLower(*dist.Distribution.Status) == "deployed" {
-			timedOut = false
 			status = true
-			break
+			return
 		}
 
-		fmt.Println("IN GOROUTINE, STATUS: ", status)
-
-		time.Sleep(time.Second * 15)
+		time.Sleep(time.Second * 10)
 	}
-
-	fmt.Println("IN GOROUTINE, STATUS: ", status)
-
-	s <- status
 
 	if timedOut {
-		e <- fmt.Errorf("operation timed out after 10 minutes")
-	} else {
-		e <- err
+		err = fmt.Errorf("operation timed out after 10 minutes")
 	}
 
-	close(e)
-	close(s)
+	return
 }
