@@ -6,10 +6,15 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
+	"github.com/hashicorp/waypoint-plugin-sdk/component"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 	"github.com/pilot-framework/aws-cloudfront-waypoint-plugin/cfront"
 	"github.com/pilot-framework/aws-cloudfront-waypoint-plugin/platform"
 )
+
+func (r *Release) URL() string { return r.Url }
+
+var _ component.Release = (*Release)(nil)
 
 type ReleaseConfig struct {
 	// This is the Origin Path that the CDN will treat as `/`
@@ -99,6 +104,8 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 		}
 	}
 
+	r := &Release{}
+
 	if !distExists {
 		u.Step("", fmt.Sprintf("Could not find distribution belonging to %v, creating new distribution...", target.Bucket))
 
@@ -117,9 +124,13 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 				*newDist.Distribution.Id,
 				*newDist.Distribution.DomainName,
 			))
+
+		r.Url = *newDist.Distribution.DomainName
+		r.Id = *newDist.Distribution.Id
+		r.Etag = *newDist.ETag
 	} else {
 		u.Step(terminal.StatusOK, fmt.Sprintf("Found an existing distribution for %v", target.Bucket))
 	}
 
-	return &Release{}, nil
+	return r, nil
 }
