@@ -97,7 +97,7 @@ func (p *Platform) ConfigSet(config interface{}) error {
 
 	tmpFiles, err := os.ReadDir("/tmp")
 	if err != nil {
-		return fmt.Errorf("Error accessing tmp directory")
+		return fmt.Errorf("error accessing tmp directory")
 	}
 
 	tmpDir := ""
@@ -110,18 +110,20 @@ func (p *Platform) ConfigSet(config interface{}) error {
 	}
 
 	if tmpDir == "" {
-		return fmt.Errorf("Could not find tmp directory for this project")
+		return fmt.Errorf("could not find tmp directory for this project")
 	}
 
 	c.BaseDir = path.Join("/tmp", tmpDir)
 	c.BuildDir = path.Join(c.BaseDir, strings.TrimLeft(c.BuildDir, "./"))
 
-	_, err = os.Stat(c.BuildDir)
+	// TODO: find graceful way to check if in destroy phase
+	// and ignore this error
+	// _, err = os.Stat(c.BuildDir)
 
-	// validate the config
-	if err != nil {
-		return fmt.Errorf("no build directory exists, got: %v", c.BuildDir)
-	}
+	// // validate the config
+	// if err != nil {
+	// 	return fmt.Errorf("no build directory exists, got: %v", c.BuildDir)
+	// }
 
 	if c.Region == "" {
 		return fmt.Errorf("region must be specified")
