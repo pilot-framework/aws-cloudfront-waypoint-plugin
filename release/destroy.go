@@ -3,7 +3,10 @@ package release
 import (
 	"context"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
+	"github.com/pilot-framework/aws-cloudfront-waypoint-plugin/cfront"
 )
 
 // Implement the Destroyer interface
@@ -11,33 +14,30 @@ func (rm *ReleaseManager) DestroyFunc() interface{} {
 	return rm.destroy
 }
 
-// A DestroyFunc does not have a strict signature, you can define the parameters
-// you need based on the Available parameters that the Waypoint SDK provides.
-// Waypoint will automatically inject parameters as specified
-// in the signature at run time.
-//
-// Available input parameters:
-// - context.Context
-// - *component.Source
-// - *component.JobInfo
-// - *component.DeploymentConfig
-// - *datadir.Project
-// - *datadir.App
-// - *datadir.Component
-// - hclog.Logger
-// - terminal.UI
-// - *component.LabelSet
-//
-// In addition to default input parameters the Deployment from the DeployFunc step
-// can also be injected.
-//
-// The output parameters for PushFunc must be a Struct which can
-// be serialzied to Protocol Buffers binary format and an error.
-// This Output Value will be made available for other functions
-// as an input parameter.
-//
-// If an error is returned, Waypoint stops the execution flow and
-// returns an error to the user.
 func (rm *ReleaseManager) destroy(ctx context.Context, ui terminal.UI, release *Release) error {
+	u := ui.Status()
+	defer u.Close()
+	u.Step("", "\n--- Destroying AWS Cloudfront Distribution ---")
+
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		u.Step(terminal.StatusError, "AWS configuration error, "+err.Error())
+		return err
+	}
+
+	client := cloudfront.NewFromConfig(cfg)
+
+	u.Update("Disabling distribution...")
+
+	err = cfront.DisableDistribution(release.Id, client)
+
+	if err != nil {
+		return err
+	}
+
+	go cfront.RemoveDistribution(release.Id, client)
+
+	u.Step(terminal.StatusOK, "Scheduled distribution for deletion")
+
 	return nil
 }

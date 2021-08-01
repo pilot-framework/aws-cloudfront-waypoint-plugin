@@ -37,6 +37,15 @@ type S3BucketAPI interface {
 	GetBucketAcl(ctx context.Context,
 		params *s3.GetBucketAclInput,
 		optFns ...func(*s3.Options)) (*s3.GetBucketAclOutput, error)
+	ListObjectsV2(ctx context.Context,
+		params *s3.ListObjectsV2Input,
+		optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
+	DeleteObject(ctx context.Context,
+		params *s3.DeleteObjectInput,
+		optFns ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
+	DeleteBucket(ctx context.Context,
+		params *s3.DeleteBucketInput,
+		optFns ...func(*s3.Options)) (*s3.DeleteBucketOutput, error)
 }
 
 // MakeBucket creates an Amazon S3 bucket.
@@ -65,6 +74,18 @@ func EnableWebHosting(c context.Context, api S3BucketAPI, input *s3.PutBucketWeb
 
 func AddFile(c context.Context, api S3BucketAPI, input *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
 	return api.PutObject(c, input)
+}
+
+func DeleteItem(c context.Context, api S3BucketAPI, input *s3.DeleteObjectInput) (*s3.DeleteObjectOutput, error) {
+	return api.DeleteObject(c, input)
+}
+
+func ListItems(c context.Context, api S3BucketAPI, input *s3.ListObjectsV2Input) (*s3.ListObjectsV2Output, error) {
+	return api.ListObjectsV2(c, input)
+}
+
+func DeleteBucket(c context.Context, api S3BucketAPI, input *s3.DeleteBucketInput) (*s3.DeleteBucketOutput, error) {
+	return api.DeleteBucket(c, input)
 }
 
 type PlatformConfig struct {
@@ -97,7 +118,7 @@ func (p *Platform) ConfigSet(config interface{}) error {
 
 	tmpFiles, err := os.ReadDir("/tmp")
 	if err != nil {
-		return fmt.Errorf("Error accessing tmp directory")
+		return fmt.Errorf("error accessing tmp directory")
 	}
 
 	tmpDir := ""
@@ -110,18 +131,20 @@ func (p *Platform) ConfigSet(config interface{}) error {
 	}
 
 	if tmpDir == "" {
-		return fmt.Errorf("Could not find tmp directory for this project")
+		return fmt.Errorf("could not find tmp directory for this project")
 	}
 
 	c.BaseDir = path.Join("/tmp", tmpDir)
 	c.BuildDir = path.Join(c.BaseDir, strings.TrimLeft(c.BuildDir, "./"))
 
-	_, err = os.Stat(c.BuildDir)
+	// TODO: find graceful way to check if in destroy phase
+	// and ignore this error
+	// _, err = os.Stat(c.BuildDir)
 
-	// validate the config
-	if err != nil {
-		return fmt.Errorf("no build directory exists, got: %v", c.BuildDir)
-	}
+	// // validate the config
+	// if err != nil {
+	// 	return fmt.Errorf("no build directory exists, got: %v", c.BuildDir)
+	// }
 
 	if c.Region == "" {
 		return fmt.Errorf("region must be specified")
@@ -229,7 +252,7 @@ func PutObjects(b, buildDir, subPath string, client *s3.Client, errors *[]string
 func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
 	u := ui.Status()
 	defer u.Close()
-	u.Step("", "---Deploying S3 assets---")
+	u.Step("", "\n---Deploying S3 assets---")
 
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(p.config.Region))
 	if err != nil {
