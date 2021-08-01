@@ -11,4 +11,5 @@ message Release {
   string url = 1;
   string id = 2;
   string etag = 3;
+  string origin = 4;
 }

@@ -128,6 +128,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 		r.Url = *newDist.Distribution.DomainName
 		r.Id = *newDist.Distribution.Id
 		r.Etag = *newDist.ETag
+		r.Origin = fmt.Sprintf("pilot-origin-%v", target.Bucket)
 	} else {
 		u.Step(terminal.StatusOK, fmt.Sprintf("Found an existing distribution for %v", target.Bucket))
 	}

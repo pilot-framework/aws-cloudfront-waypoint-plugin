@@ -3,6 +3,7 @@ package cfront
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
@@ -16,6 +17,16 @@ type CloudfrontAPI interface {
 		input *cloudfront.GetDistributionInput,
 		optFns ...func(*cloudfront.Options),
 	) (*cloudfront.GetDistributionOutput, error)
+	GetDistributionConfig(
+		ctx context.Context,
+		input *cloudfront.GetDistributionConfigInput,
+		optFns ...func(*cloudfront.Options),
+	) (*cloudfront.GetDistributionConfigOutput, error)
+	UpdateDistribution(
+		ctx context.Context,
+		input *cloudfront.UpdateDistributionInput,
+		optFns ...func(*cloudfront.Options),
+	) (*cloudfront.UpdateDistributionOutput, error)
 	DeleteDistribution(
 		ctx context.Context,
 		input *cloudfront.DeleteDistributionInput,
@@ -48,12 +59,36 @@ type CloudfrontAPI interface {
 	) (*cloudfront.DeleteOriginRequestPolicyOutput, error)
 }
 
+func GetDistribution(
+	c context.Context,
+	api CloudfrontAPI,
+	input *cloudfront.GetDistributionInput,
+) (*cloudfront.GetDistributionOutput, error) {
+	return api.GetDistribution(c, input)
+}
+
 func GetAllDistributions(
 	c context.Context,
 	api CloudfrontAPI,
 	input *cloudfront.ListDistributionsInput,
 ) (*cloudfront.ListDistributionsOutput, error) {
 	return api.ListDistributions(c, input)
+}
+
+func GetDistributionConfig(
+	c context.Context,
+	api CloudfrontAPI,
+	input *cloudfront.GetDistributionConfigInput,
+) (*cloudfront.GetDistributionConfigOutput, error) {
+	return api.GetDistributionConfig(c, input)
+}
+
+func UpdateDistribution(
+	c context.Context,
+	api CloudfrontAPI,
+	input *cloudfront.UpdateDistributionInput,
+) (*cloudfront.UpdateDistributionOutput, error) {
+	return api.UpdateDistribution(c, input)
 }
 
 func DeleteDistribution(
@@ -168,4 +203,70 @@ func FormatDistributionInput(bucket string, region string, root string) *cloudfr
 	}
 
 	return input
+}
+
+func DisableDistribution(id string, client *cloudfront.Client) error {
+	getCfgInput := &cloudfront.GetDistributionConfigInput{
+		Id: &id,
+	}
+
+	cfg, err := GetDistributionConfig(context.TODO(), client, getCfgInput)
+	if err != nil {
+		return err
+	}
+
+	enabled := false
+
+	cfg.DistributionConfig.Enabled = &enabled
+
+	updateCfgInput := &cloudfront.UpdateDistributionInput{
+		DistributionConfig: cfg.DistributionConfig,
+		Id:                 &id,
+		IfMatch:            cfg.ETag,
+	}
+
+	_, err = UpdateDistribution(context.TODO(), client, updateCfgInput)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func PollStatus(id string, client *cloudfront.Client, s chan<- bool, e chan<- error) {
+	distInput := &cloudfront.GetDistributionInput{
+		Id: &id,
+	}
+
+	timedOut := false
+	status := false
+
+	// times out after ten minutes
+	for i := 0; i < 40; i++ {
+		dist, err := GetDistribution(context.TODO(), client, distInput)
+		if err != nil {
+			e <- err
+			break
+		}
+
+		if strings.ToLower(*dist.Distribution.Status) == "deployed" {
+			status = true
+			break
+		}
+
+		// check on distribution status every 15 seconds
+		if i == 39 {
+			timedOut = true
+		}
+		time.Sleep(time.Second * 15)
+	}
+
+	if timedOut && !status {
+		e <- fmt.Errorf("operation timed out after 10 minutes")
+	}
+
+	s <- status
+
+	close(e)
+	close(s)
 }
