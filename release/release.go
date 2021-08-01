@@ -125,7 +125,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 				*newDist.Distribution.DomainName,
 			))
 
-		r.Url = *newDist.Distribution.DomainName
+		r.Url = "https://" + *newDist.Distribution.DomainName
 		r.Id = *newDist.Distribution.Id
 		r.Etag = *newDist.ETag
 		r.Origin = fmt.Sprintf("pilot-origin-%v", target.Bucket)

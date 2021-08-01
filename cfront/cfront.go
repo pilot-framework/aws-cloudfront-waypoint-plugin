@@ -261,34 +261,39 @@ func PollStatus(id string, client *cloudfront.Client, s chan<- bool, e chan<- er
 		Id: &id,
 	}
 
-	timedOut := false
+	timedOut := true
 	status := false
+	var err error
 
 	// times out after ten minutes
 	for i := 0; i < 40; i++ {
-		dist, err := GetDistribution(context.TODO(), client, distInput)
+		fmt.Println("IN GOROUTINE, ITER: ", i)
+		dist, getErr := GetDistribution(context.TODO(), client, distInput)
 		if err != nil {
-			e <- err
+			err = getErr
 			break
 		}
 
 		if strings.ToLower(*dist.Distribution.Status) == "deployed" {
+			timedOut = false
 			status = true
 			break
 		}
 
-		// check on distribution status every 15 seconds
-		if i == 39 {
-			timedOut = true
-		}
+		fmt.Println("IN GOROUTINE, STATUS: ", status)
+
 		time.Sleep(time.Second * 15)
 	}
 
-	if timedOut && !status {
-		e <- fmt.Errorf("operation timed out after 10 minutes")
-	}
+	fmt.Println("IN GOROUTINE, STATUS: ", status)
 
 	s <- status
+
+	if timedOut {
+		e <- fmt.Errorf("operation timed out after 10 minutes")
+	} else {
+		e <- err
+	}
 
 	close(e)
 	close(s)

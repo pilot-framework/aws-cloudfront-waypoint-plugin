@@ -2,6 +2,7 @@ package release
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
@@ -39,12 +40,21 @@ func (rm *ReleaseManager) destroy(ctx context.Context, ui terminal.UI, release *
 		return err
 	}
 
+	u.Step("", "Starting goroutine")
+
 	go cfront.PollStatus(release.Id, client, pollStatus, pollError)
+
+	u.Step("", "Waiting on goroutine")
 
 	s := <-pollStatus
 
-	if !s {
-		return <-pollError
+	u.Step("", fmt.Sprintf("Received status of %v", s))
+
+	err = <-pollError
+
+	if err != nil && !s {
+		u.Step("", fmt.Sprintf("Recieved pollError: %v", err.Error()))
+		return err
 	}
 
 	u.Step(terminal.StatusOK, "Distribution disabled")
@@ -56,6 +66,8 @@ func (rm *ReleaseManager) destroy(ctx context.Context, ui terminal.UI, release *
 	if err != nil {
 		return err
 	}
+
+	u.Step(terminal.StatusOK, "Deleted distribution")
 
 	return nil
 }
